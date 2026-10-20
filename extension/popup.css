@@ -1,0 +1,70 @@
+body {
+    font:
+        13px system-ui,
+        sans-serif;
+    width: 340px;
+    margin: 0;
+    padding: 12px 16px;
+    color: #202124;
+}
+h1 {
+    font-size: 16px;
+    margin: 0 0 8px;
+}
+#summary {
+    font-weight: 600;
+    margin: 0 0 8px;
+}
+#summary.outdated {
+    color: #d93025;
+}
+dl {
+    display: grid;
+    grid-template-columns: max-content 1fr;
+    gap: 4px 12px;
+    margin: 0 0 8px;
+}
+dt {
+    color: #5f6368;
+}
+dd {
+    margin: 0;
+    overflow-wrap: anywhere;
+}
+.note {
+    color: #5f6368;
+    font-size: 12px;
+}
+.actions {
+    display: flex;
+    gap: 8px;
+}
+button {
+    padding: 6px 10px;
+}
+select {
+    display: block;
+    width: 100%;
+    margin: 4px 0 8px;
+}
+#open-update {
+    background: #1a73e8;
+    border: 1px solid #1a73e8;
+    border-radius: 4px;
+    color: #fff;
+}
+details {
+    margin: 12px 0;
+}
+summary {
+    cursor: pointer;
+    font-weight: 600;
+    margin-bottom: 8px;
+}
+#version-info dl {
+    grid-template-columns: 1fr;
+    gap: 2px;
+}
+#version-info dd {
+    margin-bottom: 6px;
+}

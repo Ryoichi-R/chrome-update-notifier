@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="ja">
+  <meta charset="utf-8" />
+  <title>更新チェッカー</title>
+  <link rel="stylesheet" href="popup.css" />
+  <body>
+    <h1>更新チェッカー</h1>
+    <p class="note">Google Chrome™向けの非公式拡張機能です。</p>
+    <p id="summary" role="status">読み込み中…</p>
+    <dl>
+      <dt>このChrome</dt>
+      <dd id="local">-</dd>
+      <dt>比較基準版</dt>
+      <dd id="reference">-</dd>
+      <dt>最終成功</dt>
+      <dd id="last-success">-</dd>
+      <dt>最終試行</dt>
+      <dd id="last-attempt">-</dd>
+    </dl>
+    <p class="note">
+      比較基準版は、VersionHistory
+      APIの安定版で、配信中かつfractionが1の版のうち最大のものです。全端末へ配信済みという保証はありません。この端末で今すぐ更新を取得できるかや、再起動待ちかどうかは判定できません。古いと判定したときは、比較基準版ごとに1回だけ更新画面を前面に開きます。基準版が変わり、このChromeが古いままなら再表示します。
+    </p>
+    <details id="settings" open>
+      <summary>設定</summary>
+      <label for="channel">このChromeの種類</label>
+      <select id="channel">
+        <option value="stable">安定版（通常のGoogle Chrome）</option>
+        <option value="unsupported">
+          対象外（延長安定版・Beta・Dev・Canary）
+        </option>
+      </select>
+      <button id="save-channel" type="button">設定を保存して確認</button>
+      <p class="note">
+        種類は自動判定できないため、初期値は安定版です。延長安定版（組織が管理するChrome）・Beta・Dev・Canaryで使う場合は「対象外」を選んでください。
+      </p>
+      <details id="version-info">
+        <summary>バージョン情報</summary>
+        <dl>
+          <dt>アプリ名</dt>
+          <dd id="app-name">-</dd>
+          <dt>バージョン</dt>
+          <dd id="app-version">-</dd>
+          <dt>ソース識別子</dt>
+          <dd id="source-commit">-</dd>
+          <dt>未コミット変更の有無</dt>
+          <dd id="source-dirty">-</dd>
+          <dt>ビルド日時</dt>
+          <dd id="built-at">-</dd>
+          <dt>実行版</dt>
+          <dd id="runtime-platform">-</dd>
+        </dl>
+        <p class="note">
+          実行版は、この拡張機能を実行しているChromeのOS／アーキテクチャです。
+        </p>
+        <button id="copy-info" type="button" disabled>情報をコピー</button>
+        <p id="copy-status" role="status"></p>
+      </details>
+    </details>
+    <div class="actions">
+      <button id="check-now" type="button">今すぐ確認</button>
+      <button id="open-update" type="button">更新画面を開く</button>
+    </div>
+    <script type="module" src="popup.js"></script>
+  </body>
+</html>

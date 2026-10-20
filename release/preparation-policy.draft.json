@@ -1,0 +1,161 @@
+{
+    "schema_version": "1.0",
+    "public_root": ".",
+    "profiles": ["source-repository"],
+    "documents": [
+        {
+            "path": "README.md",
+            "required_sections": [
+                "概要",
+                "動作要件",
+                "インストール",
+                "使用方法",
+                "設定",
+                "アンインストール",
+                "既知の制限",
+                "ライセンス"
+            ]
+        },
+        {
+            "path": "RELEASING.md",
+            "required_sections": [
+                "検証",
+                "ZIPとハッシュの生成",
+                "再現性と配布内容の確認",
+                "commit前とcommit後",
+                "公開準備policy案"
+            ]
+        },
+        {
+            "path": "LICENSE",
+            "required_sections": []
+        },
+        {
+            "path": "extension/LICENSE",
+            "required_sections": []
+        },
+        {
+            "path": "CONTRIBUTING.md",
+            "required_sections": ["開発前の確認", "検証", "変更の提出"]
+        },
+        {
+            "path": "SECURITY.md",
+            "required_sections": [
+                "非公開の脆弱性報告",
+                "一般の問い合わせと保守範囲"
+            ]
+        },
+        {
+            "path": "THIRD-PARTY-NOTICES.md",
+            "required_sections": [
+                "第一者コードとアイコン",
+                "商標・外部API・fixture",
+                "開発用依存と配布物"
+            ]
+        },
+        {
+            "path": "CODE_OF_CONDUCT.md",
+            "required_sections": ["行動の基準", "運用担当と報告経路"]
+        }
+    ],
+    "candidate": {
+        "allowlist": [
+            ".gitignore",
+            ".gitattributes",
+            "LICENSE",
+            "README.md",
+            "RELEASING.md",
+            "build.mjs",
+            "release.mjs",
+            "release/preparation-policy.draft.json",
+            "extension/**",
+            "tests/**",
+            "CONTRIBUTING.md",
+            "SECURITY.md",
+            "THIRD-PARTY-NOTICES.md",
+            "CODE_OF_CONDUCT.md"
+        ],
+        "denylist": [
+            ".git/**",
+            "dist/**",
+            "coverage/**",
+            "node_modules/**",
+            "**/.env",
+            "**/.env.*",
+            "**/*.log",
+            "**/.DS_Store",
+            "**/Thumbs.db",
+            "**/Desktop.ini"
+        ],
+        "max_file_bytes": 1048576,
+        "max_total_bytes": 10485760,
+        "allow_reparse_points": false
+    },
+    "validation": {
+        "required_receipt_types": [
+            "quality",
+            "artifact",
+            "manual-acceptance",
+            "clean-verification"
+        ],
+        "expected_test_projects": ["chrome-update-notifier-node"],
+        "minimum_test_count": 90,
+        "allow_skips": false,
+        "minimum_line_coverage": 90,
+        "minimum_branch_coverage": null,
+        "require_formatter": true,
+        "require_linter": true,
+        "require_dependency_review": true
+    },
+    "manual_acceptance": [
+        {
+            "id": "mac-zip-install-update",
+            "requirement": "not-applicable",
+            "reason": "2026-10-16の利用者判断で今回候補の残手動受入を省略。未実施を成功扱いにしない。Mac自動補助結果は保持し、未確認の範囲と以前の証跡は別途記録する。"
+        },
+        {
+            "id": "windows-zip-install-update",
+            "requirement": "not-applicable",
+            "reason": "2026-10-16の利用者判断で今回候補の残手動受入を省略。未実施を成功扱いにしない。Mac自動補助結果は保持し、未確認の範囲と以前の証跡は別途記録する。"
+        },
+        {
+            "id": "brand-and-asset-review",
+            "requirement": "required",
+            "reason": "名称・商標の公式資料とアイコン等の来歴を確認する。"
+        },
+        {
+            "id": "support-and-identity-review",
+            "requirement": "required",
+            "reason": "公開連絡先・非公開の脆弱性窓口・GitHub ID付きnoreplyを用途別に確認する。"
+        },
+        {
+            "id": "code-of-conduct-governance",
+            "requirement": "required",
+            "reason": "運用担当・適用範囲・応答/措置・再検討/利益相反・情報保持はowner選択を反映済み。行動規範用の公開メール窓口にはowner指定のGmailを採用し、Proton登録方針から切り替えた。送受信の到達性・返信時の表示名/署名・実設定は未確認。到達性の証跡が揃うまでnot-runとし、宛先の採用だけで運用受入を完了扱いにしない。"
+        }
+    ],
+    "artifacts": [
+        {
+            "id": "unpacked-extension-zip",
+            "path_pattern": "dist/**/chrome-update-notifier-*.zip",
+            "runtime": "Google Chrome 106+ stable (macOS/Windows)",
+            "architectures": ["any"],
+            "allowed_extensions": [".zip"],
+            "forbidden_names": [
+                ".env",
+                ".git",
+                "node_modules",
+                "tests",
+                "fixtures"
+            ],
+            "signature_policy": "not-applicable",
+            "debug_symbols": "forbidden"
+        }
+    ],
+    "integrity": {
+        "require_hashes": true,
+        "require_sbom": false,
+        "require_dependency_review": true,
+        "require_clean_install": true
+    }
+}

@@ -1,0 +1,13 @@
+# Build output and local verification artifacts
+/dist/
+/coverage/
+/node_modules/
+**/node_modules/
+*.log
+
+# Local secrets and operating system metadata
+.env
+.env.*
+.DS_Store
+Thumbs.db
+Desktop.ini

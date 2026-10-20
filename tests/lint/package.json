@@ -1,0 +1,13 @@
+{
+    "name": "chrome-update-notifier-lint",
+    "version": "0.0.0",
+    "private": true,
+    "license": "MIT",
+    "engines": {
+        "node": "^22.13.0 || >=24"
+    },
+    "devDependencies": {
+        "@eslint/js": "10.0.1",
+        "eslint": "10.12.0"
+    }
+}

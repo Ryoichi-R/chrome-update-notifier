@@ -1,0 +1,26 @@
+{
+    "manifest_version": 3,
+    "minimum_chrome_version": "106",
+    "name": "更新チェッカー",
+    "version": "0.2.0",
+    "description": "Google Chrome™向けの非公式拡張機能。APIの条件に合う安定版より古いときに通知し、比較基準版ごとに1回だけ更新画面を開きます。この端末で更新を取得できるかは判定しません。",
+    "permissions": ["alarms", "notifications", "storage"],
+    "host_permissions": ["https://versionhistory.googleapis.com/*"],
+    "background": { "service_worker": "background.js", "type": "module" },
+    "icons": {
+        "16": "icon.png",
+        "32": "icon.png",
+        "48": "icon.png",
+        "128": "icon.png"
+    },
+    "action": {
+        "default_title": "更新チェッカー",
+        "default_popup": "popup.html",
+        "default_icon": {
+            "16": "icon.png",
+            "32": "icon.png",
+            "48": "icon.png",
+            "128": "icon.png"
+        }
+    }
+}
