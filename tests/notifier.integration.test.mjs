@@ -103,6 +103,7 @@ test('a failed notification is not stored as notified and is retried', async () 
     assert.equal(browser.calls.notificationsCreate, 1);
     assert.equal(browser.storage.notifiedKey, undefined);
     assert.equal(browser.badge.text, '!');
+    assert.deepEqual(browser.tabs, [UPDATE_PAGE_URL]);
     chrome.failNotifications = false;
     await notifier.check();
     assert.equal(browser.calls.notificationsCreate, 2);
@@ -110,7 +111,202 @@ test('a failed notification is not stored as notified and is retried', async () 
         browser.storage.notifiedKey,
         'outdated:mac_arm64:155.0.8059.40',
     );
+    assert.deepEqual(browser.tabs, [UPDATE_PAGE_URL]);
 });
+
+for (const existingAlarm of [false, true]) {
+    test(`restoration failure still checks with existing alarm=${existingAlarm}`, async (t) => {
+        t.mock.method(console, 'warn', () => {});
+        const { chrome, browser, fetchFn, deps } = setup();
+        const alarm = {
+            name: ALARM_NAME,
+            periodInMinutes: CHECK_PERIOD_MINUTES,
+            scheduledTime: start.getTime() + 6 * HOUR,
+        };
+        if (existingAlarm) browser.alarms.set(ALARM_NAME, alarm);
+        const get = chrome.storage.local.get;
+        const restorationKeys = [
+            'lastAttempt',
+            'lastSuccess',
+            'notifiedKey',
+            'autoOpenedKey',
+        ];
+        let failed = false;
+        chrome.storage.local.get = async (keys) => {
+            if (
+                !failed &&
+                JSON.stringify(keys) === JSON.stringify(restorationKeys)
+            ) {
+                failed = true;
+                throw new Error('restoration read failed');
+            }
+            return get(keys);
+        };
+        await installNotifier(deps).ready;
+        assert.equal(failed, true);
+        assert.equal(browser.alarms.has(ALARM_NAME), true);
+        assert.equal(browser.calls.alarmsCreate, existingAlarm ? 0 : 1);
+        if (existingAlarm)
+            assert.deepEqual(browser.alarms.get(ALARM_NAME), alarm);
+        assert.equal(fetchFn.calls.length, 1);
+        assert.equal(browser.storage.lastAttempt.status, 'OUTDATED');
+    });
+}
+
+for (const route of ['check', 'settings']) {
+    test(`failed startup alarm is repaired by ${route} after recovery`, async (t) => {
+        t.mock.method(console, 'warn', () => {});
+        const { chrome, browser, fetchFn, deps } = setup();
+        const create = chrome.alarms.create;
+        chrome.alarms.create = async () => {
+            throw new Error('alarm unavailable');
+        };
+        const { notifier, ready } = installNotifier(deps);
+        await ready;
+        assert.equal(browser.alarms.size, 0);
+        assert.equal(fetchFn.calls.length, 1);
+        assert.equal(browser.storage.lastAttempt.status, 'OUTDATED');
+        chrome.alarms.create = create;
+        const attempt = await (route === 'check'
+            ? notifier.check()
+            : notifier.setChannelConfirmation('stable'));
+        assert.equal(attempt.status, 'OUTDATED');
+        assert.equal(fetchFn.calls.length, 2);
+        assert.equal(browser.calls.alarmsCreate, 1);
+        assert.equal(
+            browser.alarms.get(ALARM_NAME).periodInMinutes,
+            CHECK_PERIOD_MINUTES,
+        );
+    });
+}
+
+test('manual, alarm and settings checks preserve the existing alarm schedule', async () => {
+    const { chrome, browser, fetchFn, deps } = setup();
+    const { notifier, ready } = installNotifier(deps);
+    await ready;
+    const alarm = browser.alarms.get(ALARM_NAME);
+    alarm.scheduledTime = start.getTime() + 6 * HOUR;
+    const expected = structuredClone(alarm);
+    const creations = browser.calls.alarmsCreate;
+    for (const route of ['manual', 'alarm', 'settings']) {
+        const fetches = fetchFn.calls.length;
+        if (route === 'alarm') {
+            chrome.alarms.onAlarm.fire({ name: ALARM_NAME });
+            // Let the listener's check finish; do not trigger a manual check.
+            await new Promise((resolve) => setImmediate(resolve));
+        } else if (route === 'settings') {
+            await notifier.setChannelConfirmation('stable');
+        } else {
+            await notifier.check();
+        }
+        assert.equal(fetchFn.calls.length, fetches + 1, route);
+        assert.equal(browser.calls.alarmsCreate, creations, route);
+        assert.deepEqual(browser.alarms.get(ALARM_NAME), expected, route);
+    }
+});
+
+for (const key of ['notifiedKey', 'autoOpenedKey']) {
+    test(`${key} save failure preserves the result and retries only that action`, async (t) => {
+        const warn = t.mock.method(console, 'warn', () => {});
+        const { chrome, browser, deps } = setup();
+        const set = chrome.storage.local.set;
+        chrome.storage.local.set = async (values) => {
+            if (Object.hasOwn(values, key)) throw new Error('key save failed');
+            return set(values);
+        };
+        const notifier = createNotifier(deps);
+        assert.equal((await notifier.check()).status, 'OUTDATED');
+        const otherKey =
+            key === 'notifiedKey' ? 'autoOpenedKey' : 'notifiedKey';
+        const id = 'outdated:mac_arm64:155.0.8059.40';
+        assert.equal(browser.storage[key], undefined);
+        assert.equal(browser.storage[otherKey], id);
+        assert.equal(browser.storage.lastAttempt.status, 'OUTDATED');
+        assert.equal(browser.badge.text, '!');
+        assert.equal(browser.notifications.length, 1);
+        assert.equal(browser.notifications[0].id, id);
+        assert.deepEqual(browser.tabs, [UPDATE_PAGE_URL]);
+        // Diagnostics must not include an error object or storage contents.
+        assert.equal(warn.mock.callCount(), 1);
+        assert.equal(warn.mock.calls[0].arguments.length, 1);
+        assert.equal(typeof warn.mock.calls[0].arguments[0], 'string');
+        chrome.storage.local.set = set;
+        assert.equal((await notifier.check()).status, 'OUTDATED');
+        assert.equal(browser.storage[key], id);
+        assert.equal(browser.storage[otherKey], id);
+        assert.equal(browser.notifications.length, 1);
+        assert.equal(browser.notifications[0].id, id);
+        assert.equal(
+            browser.calls.notificationsCreate,
+            key === 'notifiedKey' ? 2 : 1,
+        );
+        assert.deepEqual(
+            browser.tabs,
+            key === 'notifiedKey'
+                ? [UPDATE_PAGE_URL]
+                : [UPDATE_PAGE_URL, UPDATE_PAGE_URL],
+        );
+    });
+
+    test(`CHECK_NOW responds ok when ${key} cannot be saved`, async (t) => {
+        t.mock.method(console, 'warn', () => {});
+        const { chrome, browser, nav, deps } = setup({
+            local: '155.0.8059.40',
+        });
+        await installNotifier(deps).ready;
+        nav.version = '154.0.8037.98';
+        const set = chrome.storage.local.set;
+        chrome.storage.local.set = async (values) => {
+            if (Object.hasOwn(values, key)) throw new Error('key save failed');
+            return set(values);
+        };
+        const response = await new Promise((resolve) => {
+            assert.deepEqual(
+                chrome.runtime.onMessage.fire(
+                    { type: 'CHECK_NOW' },
+                    { id: chrome.runtime.id },
+                    resolve,
+                ),
+                [true],
+            );
+        });
+        assert.equal(response.ok, true);
+        assert.equal(response.attempt.status, 'OUTDATED');
+        assert.equal(browser.storage[key], undefined);
+        assert.equal(browser.notifications.length, 1);
+        assert.deepEqual(browser.tabs, [UPDATE_PAGE_URL]);
+    });
+}
+
+for (const existingDisplay of [false, true]) {
+    test(`all storage writes failing preserves display=${existingDisplay} and stops side effects`, async () => {
+        const { chrome, browser, fetchFn, deps } = setup();
+        const notifier = createNotifier(deps);
+        if (existingDisplay) {
+            await notifier.check();
+            fetchFn.respond = jsonResponse(releases(['156.0.8078.12', 1]));
+        }
+        const before = structuredClone({
+            badge: browser.badge,
+            storage: browser.storage,
+            notifications: browser.notifications,
+            tabs: browser.tabs,
+        });
+        chrome.storage.local.set = async () => {
+            throw new Error('all writes failed');
+        };
+        await assert.rejects(notifier.check(), /all writes failed/);
+        assert.deepEqual(
+            {
+                badge: browser.badge,
+                storage: browser.storage,
+                notifications: browser.notifications,
+                tabs: browser.tabs,
+            },
+            before,
+        );
+    });
+}
 
 test('messages from other senders or of other types are ignored', () => {
     const { chrome, fetchFn, deps } = setup({ browser: createBrowserState() });

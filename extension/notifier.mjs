@@ -77,7 +77,12 @@ export function createNotifier({
             console.warn('notification failed', error);
             return false;
         }
-        await chrome.storage.local.set({ notifiedKey: notification.key });
+        try {
+            await chrome.storage.local.set({ notifiedKey: notification.key });
+        } catch {
+            console.warn('saving the notification key failed');
+            return false;
+        }
         return true;
     }
 
@@ -92,11 +97,21 @@ export function createNotifier({
             console.warn('opening the update page failed', error);
             return false;
         }
-        await chrome.storage.local.set({ autoOpenedKey: autoOpen.key });
+        try {
+            await chrome.storage.local.set({ autoOpenedKey: autoOpen.key });
+        } catch {
+            console.warn('saving the update page key failed');
+            return false;
+        }
         return true;
     }
 
     async function performCheck() {
+        try {
+            await ensureAlarm();
+        } catch {
+            console.warn('preparing the alarm before checking failed');
+        }
         const { channelConfirmation } = await chrome.storage.local.get(
             'channelConfirmation',
         );
@@ -210,9 +225,22 @@ export function createNotifier({
     }
 
     async function startup() {
-        await restoreDisplay();
-        await ensureAlarm();
-        return checkIfNeeded();
+        try {
+            await ensureAlarm();
+        } catch {
+            console.warn('preparing the startup alarm failed');
+        }
+        try {
+            await restoreDisplay();
+        } catch {
+            console.warn('restoring the startup display failed');
+        }
+        try {
+            return await checkIfNeeded();
+        } catch {
+            console.warn('checking at startup failed');
+            return null;
+        }
     }
 
     function openUpdatePage() {
