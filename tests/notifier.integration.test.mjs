@@ -6,6 +6,8 @@ import {
     CHECK_PERIOD_MINUTES,
     createNotifier,
     installNotifier,
+    RETRY_ALARM_NAME,
+    RETRY_DELAYS_MINUTES,
     UPDATE_PAGE_URL,
 } from '../extension/notifier.mjs';
 import {
@@ -380,15 +382,93 @@ test('a relaunch with a new local version checks at once even within 24 hours', 
     assert.equal(browser.badge.text, '');
     assert.equal(browser.storage.lastAttempt.local, '155.0.8059.40');
 
-    // The next relaunch with the same version does not fetch again.
+    // The last attempt failed, so the next relaunch checks again.
     const third = setup({
         browser,
         local: '155.0.8059.40',
         clockAt: new Date(start.getTime() + 2 * HOUR),
     });
     await installNotifier(third.deps).ready;
-    assert.equal(third.fetchFn.calls.length, 0);
+    assert.equal(third.fetchFn.calls.length, 1);
     assert.equal(browser.badge.text, '');
+    assert.equal(browser.storage.lastAttempt.status, 'UP_TO_DATE');
+
+    // After that success, a relaunch with the same version does not fetch.
+    const fourth = setup({
+        browser,
+        local: '155.0.8059.40',
+        clockAt: new Date(start.getTime() + 3 * HOUR),
+    });
+    await installNotifier(fourth.deps).ready;
+    assert.equal(fourth.fetchFn.calls.length, 0);
+    assert.equal(browser.badge.text, '');
+});
+
+test('a failure after an up-to-date result is retried by a growing one-shot alarm', async () => {
+    const { chrome, browser, fetchFn, clock, deps } = setup({
+        local: '155.0.8059.40',
+    });
+    const { ready } = installNotifier(deps);
+    await ready;
+    assert.equal(browser.badge.text, '');
+    assert.equal(browser.alarms.has(RETRY_ALARM_NAME), false);
+
+    // Offline after sleep: gray badge and a retry instead of waiting 6 hours.
+    fetchFn.respond = new TypeError('offline');
+    const delays = [];
+    for (let i = 0; i < RETRY_DELAYS_MINUTES.length + 1; i++) {
+        clock.now = new Date(start.getTime() + (i + 1) * HOUR);
+        await createNotifier(deps).check();
+        assert.equal(browser.badge.text, '?');
+        delays.push(browser.alarms.get(RETRY_ALARM_NAME).delayInMinutes);
+    }
+    assert.deepEqual(delays, [...RETRY_DELAYS_MINUTES, 60]);
+    // The periodic alarm is kept.
+    assert.equal(browser.alarms.get(ALARM_NAME).periodInMinutes, 360);
+
+    // The retry alarm runs a check; success clears the retry and the count.
+    fetchFn.respond = jsonResponse(measured);
+    const before = fetchFn.calls.length;
+    chrome.alarms.onAlarm.fire({ name: RETRY_ALARM_NAME });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(fetchFn.calls.length, before + 1);
+    assert.equal(browser.badge.text, '');
+    assert.equal(browser.alarms.has(RETRY_ALARM_NAME), false);
+    assert.equal(browser.storage.retryCount, 0);
+    assert.equal(browser.alarms.has(ALARM_NAME), true);
+});
+
+test('a stored failure is checked again at startup within 24 hours', async () => {
+    const { browser, fetchFn, clock, deps } = setup({ local: '155.0.8059.40' });
+    await createNotifier(deps).check();
+    fetchFn.respond = new TypeError('offline');
+    clock.now = new Date(start.getTime() + HOUR);
+    await createNotifier(deps).check();
+    assert.equal(browser.badge.text, '?');
+
+    // Browser restart within 24 hours of the last success, network back.
+    fetchFn.respond = jsonResponse(measured);
+    clock.now = new Date(start.getTime() + 2 * HOUR);
+    const calls = fetchFn.calls.length;
+    await createNotifier(deps).startup();
+    assert.equal(fetchFn.calls.length, calls + 1);
+    assert.equal(browser.badge.text, '');
+    assert.equal(browser.storage.lastAttempt.status, 'UP_TO_DATE');
+});
+
+test('a failing retry schedule does not break the check', async (t) => {
+    t.mock.method(console, 'warn', () => {});
+    const { chrome, browser, deps } = setup({
+        respond: new TypeError('offline'),
+    });
+    chrome.alarms.create = async (name, info) => {
+        if (name === RETRY_ALARM_NAME) throw new Error('alarm failure');
+        browser.alarms.set(name, { name, ...info });
+    };
+    const attempt = await createNotifier(deps).check();
+    assert.equal(attempt.status, 'ERROR');
+    assert.equal(browser.badge.text, '?');
+    assert.equal(browser.alarms.has(RETRY_ALARM_NAME), false);
 });
 
 test('outdated -> offline keeps red -> recovered -> updated and relaunched clears the badge', async () => {

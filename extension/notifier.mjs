@@ -10,6 +10,11 @@ export const ALARM_NAME = 'check';
 export const CHECK_PERIOD_MINUTES = 360;
 export const STARTUP_STALE_MS = 24 * 60 * 60 * 1000;
 export const UPDATE_PAGE_URL = 'chrome://settings/help';
+// A failed check (offline after sleep, a timeout) is retried by a one-shot
+// alarm instead of keeping the gray badge until the next 6-hour check. The
+// delay grows with consecutive failures and stays at the last value.
+export const RETRY_ALARM_NAME = 'retry';
+export const RETRY_DELAYS_MINUTES = Object.freeze([5, 15, 30, 60]);
 const STORAGE_KEYS = [
     'lastAttempt',
     'lastSuccess',
@@ -142,9 +147,38 @@ export function createNotifier({
             lastSuccess: decision.lastSuccess,
         });
         await applyDisplay(decision);
+        await scheduleRetry(attempt.status === 'ERROR');
         if (decision.notification) await notify(decision.notification);
         if (decision.autoOpen) await autoOpenUpdatePage(decision.autoOpen);
         return decision.lastAttempt;
+    }
+
+    // After a failure, sets a one-shot retry; after any other result, removes
+    // a pending retry and resets the count. Best effort: the 6-hour alarm and
+    // the startup check still recover if this fails.
+    async function scheduleRetry(failed) {
+        try {
+            const { retryCount } = await chrome.storage.local.get('retryCount');
+            const count = Number.isInteger(retryCount) ? retryCount : 0;
+            if (failed) {
+                const delayInMinutes =
+                    RETRY_DELAYS_MINUTES[
+                        Math.min(count, RETRY_DELAYS_MINUTES.length - 1)
+                    ];
+                await chrome.alarms.create(RETRY_ALARM_NAME, {
+                    delayInMinutes,
+                });
+                await chrome.storage.local.set({ retryCount: count + 1 });
+            } else if (
+                count !== 0 ||
+                (await chrome.alarms.get(RETRY_ALARM_NAME))
+            ) {
+                await chrome.alarms.clear(RETRY_ALARM_NAME);
+                await chrome.storage.local.set({ retryCount: 0 });
+            }
+        } catch {
+            console.warn('scheduling the retry failed');
+        }
     }
 
     function check() {
@@ -200,9 +234,10 @@ export function createNotifier({
     }
 
     // Checks at once when the last success is missing or 24 hours old, when
-    // the channel setting differs from the one of the last attempt, or when
-    // the local version differs from the stored one (Chrome was updated and
-    // relaunched), so a stale badge is not restored for hours.
+    // the last attempt failed, when the channel setting differs from the one
+    // of the last attempt, or when the local version differs from the stored
+    // one (Chrome was updated and relaunched), so a stale badge is not
+    // restored for hours.
     async function checkIfNeeded() {
         const { lastAttempt, lastSuccess, channelConfirmation } =
             await chrome.storage.local.get([
@@ -216,7 +251,8 @@ export function createNotifier({
         const sameChannel =
             lastAttempt?.channelConfirmation ===
             normalizeChannel(channelConfirmation);
-        if (fresh && sameChannel) {
+        const failed = lastAttempt?.status === 'ERROR';
+        if (fresh && sameChannel && !failed) {
             const local = await getLocalChromeVersion(nav);
             const known = lastAttempt?.local ?? lastSuccess?.local ?? null;
             if (local.status === 'OK' && local.version === known) return null;
@@ -274,7 +310,7 @@ export function installNotifier(deps) {
     chrome.runtime.onInstalled.addListener(startOnce);
     chrome.runtime.onStartup.addListener(startOnce);
     chrome.alarms.onAlarm.addListener((alarm) => {
-        if (alarm.name === ALARM_NAME)
+        if (alarm.name === ALARM_NAME || alarm.name === RETRY_ALARM_NAME)
             notifier
                 .check()
                 .catch((error) => console.error('check failed', error));

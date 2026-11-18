@@ -86,6 +86,9 @@ export function createFakeChrome({
                 browser.calls.alarmsCreate++;
                 browser.alarms.set(name, { name, ...info });
             },
+            async clear(name) {
+                return browser.alarms.delete(name);
+            },
             onAlarm: createEvent(),
         },
         action: {
