@@ -29,6 +29,21 @@ export async function runCheck({
     };
     try {
         const platform = resolvePlatform(platformInfo);
+        const channel = resolveChannel(channelConfirmation);
+        if (channel.status !== 'OK') {
+            // Keep available version information for the popup. A missing
+            // version or platform must never turn an opt-out into a retry.
+            const local =
+                platform.status === 'OK'
+                    ? await getLocalChromeVersion(nav).catch(() => null)
+                    : null;
+            return {
+                ...result,
+                ...channel,
+                platform: platform.platform ?? null,
+                local: local?.version ?? null,
+            };
+        }
         if (platform.status !== 'OK') {
             return {
                 ...result,
@@ -47,15 +62,6 @@ export async function runCheck({
             };
         }
         result.local = local.version;
-
-        const channel = resolveChannel(channelConfirmation);
-        if (channel.status !== 'OK') {
-            return {
-                ...result,
-                status: channel.status,
-                reason: channel.reason,
-            };
-        }
 
         const reference = await fetchReferenceRelease({
             fetchFn,

@@ -131,3 +131,40 @@ test('a timeout aborts the request signal', async () => {
     );
     assert.equal(signal.aborted, true);
 });
+
+test('the next page can contain the highest qualifying release', async () => {
+    const first = { ...releases(['156.0.0.1', 0.1]), nextPageToken: 'a+/=' };
+    const second = { ...releases(['155.0.0.1', 1]), nextPageToken: 'unused' };
+    const fetchFn = createFakeFetch((url) => {
+        const token = new URL(url).searchParams.get('pageToken');
+        assert.ok(token === null || token === first.nextPageToken);
+        return jsonResponse(token === null ? first : second);
+    });
+    assert.equal(
+        await fetchReferenceRelease({ fetchFn, platform: 'mac' }),
+        '155.0.0.1',
+    );
+    assert.equal(fetchFn.calls.length, 2);
+});
+
+test('repeated page tokens and interrupted response bodies have distinct errors', async () => {
+    const page = { ...releases(), nextPageToken: 'same' };
+    const fetchFn = createFakeFetch(jsonResponse(page));
+    assert.equal(
+        await kindOf(fetchReferenceRelease({ fetchFn, platform: 'win' })),
+        'MALFORMED',
+    );
+    assert.equal(fetchFn.calls.length, 2);
+    const broken = async () => ({
+        ok: true,
+        text: async () => {
+            throw new TypeError('disconnected');
+        },
+    });
+    assert.equal(
+        await kindOf(
+            fetchReferenceRelease({ fetchFn: broken, platform: 'win' }),
+        ),
+        'NETWORK',
+    );
+});

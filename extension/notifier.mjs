@@ -4,6 +4,7 @@ import {
     CHANNEL_SETTINGS,
     getLocalChromeVersion,
     normalizeChannel,
+    resolvePlatform,
 } from './environment.mjs';
 
 export const ALARM_NAME = 'check';
@@ -111,6 +112,14 @@ export function createNotifier({
         return true;
     }
 
+    async function getPlatformInfo() {
+        try {
+            return await chrome.runtime.getPlatformInfo();
+        } catch {
+            return null;
+        }
+    }
+
     async function performCheck() {
         try {
             await ensureAlarm();
@@ -120,16 +129,10 @@ export function createNotifier({
         const { channelConfirmation } = await chrome.storage.local.get(
             'channelConfirmation',
         );
-        let platformInfo = null;
-        try {
-            platformInfo = await chrome.runtime.getPlatformInfo();
-        } catch {
-            // runCheck reports a missing platform as PLATFORM_INFO.
-        }
         const attempt = await runCheck({
             fetchFn,
             nav,
-            platformInfo,
+            platformInfo: await getPlatformInfo(),
             channelConfirmation,
             now: clock(),
             timeoutMs,
@@ -181,13 +184,17 @@ export function createNotifier({
         }
     }
 
+    function enqueueCheck(operation) {
+        const result = serialize(operation).finally(() => {
+            // A later settings change may already have reserved the next check.
+            if (inFlight === result) inFlight = null;
+        });
+        inFlight = result;
+        return result;
+    }
+
     function check() {
-        if (!inFlight) {
-            inFlight = serialize(performCheck).finally(() => {
-                inFlight = null;
-            });
-        }
-        return inFlight;
+        return inFlight ?? enqueueCheck(performCheck);
     }
 
     // Shows the stored state again after the worker or the browser restarted.
@@ -214,10 +221,13 @@ export function createNotifier({
                 new TypeError('INVALID_CHANNEL_CONFIRMATION'),
             );
         }
-        return serialize(async () => {
+        const pending = inFlight;
+        return enqueueCheck(async () => {
             await chrome.storage.local.set({
                 channelConfirmation: confirmation,
             });
+            const previous = pending && (await pending.catch(() => null));
+            if (previous?.channelConfirmation === confirmation) return previous;
             return performCheck();
         });
     }
@@ -238,7 +248,7 @@ export function createNotifier({
     // of the last attempt, or when the local version differs from the stored
     // one (Chrome was updated and relaunched), so a stale badge is not
     // restored for hours.
-    async function checkIfNeeded() {
+    async function needsCheck() {
         const { lastAttempt, lastSuccess, channelConfirmation } =
             await chrome.storage.local.get([
                 'lastAttempt',
@@ -252,27 +262,50 @@ export function createNotifier({
             lastAttempt?.channelConfirmation ===
             normalizeChannel(channelConfirmation);
         const failed = lastAttempt?.status === 'ERROR';
-        if (fresh && sameChannel && !failed) {
-            const local = await getLocalChromeVersion(nav);
-            const known = lastAttempt?.local ?? lastSuccess?.local ?? null;
-            if (local.status === 'OK' && local.version === known) return null;
+        if (!sameChannel || failed) return true;
+        if (
+            lastAttempt.reason === 'CHANNEL' ||
+            lastAttempt.reason === 'CHANNEL_INVALID'
+        ) {
+            return false;
         }
-        return check();
+        if (!fresh) return true;
+        const platform = resolvePlatform(await getPlatformInfo());
+        if (
+            platform.status !== 'OK' ||
+            platform.platform !== lastAttempt.platform
+        )
+            return true;
+        const local = await getLocalChromeVersion(nav);
+        return local.status !== 'OK' || local.version !== lastAttempt.local;
     }
 
-    async function startup() {
+    // Decide inside the same queue as restoration and settings. A check queued
+    // during preparation is still pending when the decision becomes available.
+    function checkIfNeeded(prepare = needsCheck) {
+        const pending = inFlight;
+        return serialize(prepare).then(
+            (needed) => inFlight ?? pending ?? (needed ? check() : null),
+        );
+    }
+
+    async function prepareStartup() {
         try {
             await ensureAlarm();
         } catch {
             console.warn('preparing the startup alarm failed');
         }
         try {
-            await restoreDisplay();
+            await performRestore();
         } catch {
             console.warn('restoring the startup display failed');
         }
+        return needsCheck();
+    }
+
+    async function startup() {
         try {
-            return await checkIfNeeded();
+            return await checkIfNeeded(prepareStartup);
         } catch {
             console.warn('checking at startup failed');
             return null;

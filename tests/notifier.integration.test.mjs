@@ -920,3 +920,99 @@ test('restoring the display after a restart does not open the update page again'
     await installNotifier(second.deps).ready;
     assert.deepEqual(first.browser.tabs, [UPDATE_PAGE_URL]);
 });
+
+test('cold alarm wakes advance the retry schedule once per failure', async () => {
+    const { browser, deps, fetchFn } = setup();
+    await createNotifier(deps).check();
+    for (const [index, delay] of RETRY_DELAYS_MINUTES.entries()) {
+        const wake = setup({ browser, respond: new TypeError('offline') });
+        const name = index === 0 ? ALARM_NAME : RETRY_ALARM_NAME;
+        if (name === RETRY_ALARM_NAME) browser.alarms.delete(name);
+        const { ready } = installNotifier(wake.deps);
+        wake.chrome.alarms.onAlarm.fire({ name });
+        await ready;
+        assert.equal(wake.fetchFn.calls.length, 1);
+        assert.equal(browser.storage.retryCount, index + 1);
+        assert.equal(
+            browser.alarms.get(RETRY_ALARM_NAME).delayInMinutes,
+            delay,
+        );
+    }
+    assert.equal(fetchFn.calls.length, 1);
+});
+
+for (const first of ['save', 'check']) {
+    test(`concurrent settings and manual checks share a result (${first} first)`, async () => {
+        const { deps, fetchFn, browser } = setup();
+        const notifier = createNotifier(deps);
+        const save = () => notifier.setChannelConfirmation('stable');
+        const results = await Promise.all(
+            first === 'save'
+                ? [save(), notifier.check()]
+                : [notifier.check(), save()],
+        );
+        assert.deepEqual(results[0], results[1]);
+        assert.equal(browser.storage.channelConfirmation, 'stable');
+        assert.equal(fetchFn.calls.length, 1);
+    });
+}
+
+test('checks following different queued settings use the latest requested channel', async () => {
+    const { deps, fetchFn, browser } = setup();
+    const notifier = createNotifier(deps);
+    const results = await Promise.all([
+        notifier.check(),
+        notifier.setChannelConfirmation('unsupported'),
+        notifier.check(),
+        notifier.setChannelConfirmation('stable'),
+        notifier.check(),
+    ]);
+    assert.deepEqual(
+        results.map((a) => a.status),
+        ['OUTDATED', 'UNSUPPORTED', 'UNSUPPORTED', 'OUTDATED', 'OUTDATED'],
+    );
+    assert.equal(fetchFn.calls.length, 2);
+    assert.equal(browser.storage.channelConfirmation, 'stable');
+});
+
+test('startup rechecks the same Chrome version on a different architecture', async () => {
+    const intel = setup();
+    intel.chrome.runtime.getPlatformInfo = async () => ({
+        os: 'mac',
+        arch: 'x86-64',
+    });
+    await createNotifier(intel.deps).check();
+    assert.equal(intel.browser.badge.text, '!');
+    const arm = setup({
+        browser: intel.browser,
+        respond: new TypeError('offline'),
+    });
+    await installNotifier(arm.deps).ready;
+    assert.equal(arm.fetchFn.calls.length, 1);
+    assert.equal(arm.browser.badge.text, '?');
+    assert.equal(arm.browser.storage.lastAttempt.platform, 'mac_arm64');
+    arm.fetchFn.respond = jsonResponse(releases([arm.nav.version, 1]));
+    await createNotifier(arm.deps).startup();
+    assert.equal(arm.browser.storage.lastSuccess.platform, 'mac_arm64');
+    assert.equal(arm.browser.badge.text, '');
+});
+
+test('opting out clears pending retries even if the local version or platform is unavailable', async () => {
+    const { chrome, browser, deps, fetchFn } = setup({
+        respond: new Error('offline'),
+    });
+    for (const platformAvailable of [true, false]) {
+        const notifier = createNotifier({ ...deps, nav: {} });
+        chrome.runtime.getPlatformInfo = async () =>
+            platformAvailable ? { os: 'mac', arch: 'arm64' } : null;
+        await notifier.setChannelConfirmation('stable');
+        assert.equal(browser.alarms.has(RETRY_ALARM_NAME), true);
+        await notifier.setChannelConfirmation('unsupported');
+        await notifier.startup();
+        assert.equal(browser.storage.lastAttempt.reason, 'CHANNEL');
+        assert.equal(browser.badge.text, '');
+        assert.equal(browser.alarms.has(RETRY_ALARM_NAME), false);
+        assert.equal(browser.storage.retryCount, 0);
+    }
+    assert.equal(fetchFn.calls.length, 0);
+});

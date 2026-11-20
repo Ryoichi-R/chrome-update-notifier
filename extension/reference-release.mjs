@@ -70,28 +70,44 @@ export async function fetchReferenceRelease({
         }, timeoutMs);
     });
     const request = (async () => {
-        let response;
-        try {
-            response = await fetchFn(url, {
-                method: 'GET',
-                cache: 'no-store',
-                credentials: 'omit',
-                signal: controller.signal,
-            });
-        } catch (error) {
-            throw new CheckError('NETWORK', error?.message);
-        }
-        if (!response || !response.ok) {
-            throw new CheckError('HTTP', String(response?.status));
-        }
-        let json;
-        try {
-            json = JSON.parse(await response.text());
-        } catch {
+        const seenTokens = new Set();
+        let pageUrl = url;
+        while (true) {
+            let body;
+            try {
+                const response = await fetchFn(pageUrl, {
+                    method: 'GET',
+                    cache: 'no-store',
+                    credentials: 'omit',
+                    signal: controller.signal,
+                });
+                if (!response?.ok)
+                    throw new CheckError('HTTP', String(response?.status));
+                body = await response.text();
+            } catch (error) {
+                if (controller.signal.aborted) throw new CheckError('TIMEOUT');
+                if (error instanceof CheckError) throw error;
+                throw new CheckError('NETWORK', error?.message);
+            }
+            let json;
+            try {
+                json = JSON.parse(body);
+            } catch {
+                throw new CheckError('MALFORMED', 'not JSON');
+            }
+            // The API sorts by descending version across pages, so the
+            // first page with a qualifying version contains the maximum.
+            const reference = selectReferenceRelease(json);
+            const token = json.nextPageToken;
+            if (reference !== null || token === undefined || token === '')
+                return reference;
+            if (typeof token !== 'string' || seenTokens.has(token)) {
+                throw new CheckError('MALFORMED', 'invalid nextPageToken');
+            }
+            seenTokens.add(token);
             if (controller.signal.aborted) throw new CheckError('TIMEOUT');
-            throw new CheckError('MALFORMED', 'not JSON');
+            pageUrl = url + '&pageToken=' + encodeURIComponent(token);
         }
-        return selectReferenceRelease(json);
     })();
     try {
         return await Promise.race([request, timeout]);

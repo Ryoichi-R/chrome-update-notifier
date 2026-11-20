@@ -81,7 +81,11 @@ function successDisplay(result) {
 function errorDisplay(attempt, lastSuccess, now) {
     const failed = `確認に失敗しました（${errorLabel(attempt.errorKind)}）`;
     const local = parseVersion(attempt.local);
-    if (lastSuccess?.status === 'OUTDATED' && local) {
+    if (
+        lastSuccess?.status === 'OUTDATED' &&
+        attempt.platform === lastSuccess.platform &&
+        local
+    ) {
         if (attempt.local === lastSuccess.local) {
             const age = now.getTime() - Date.parse(lastSuccess.at);
             if (age >= 0 && age <= STALE_OUTDATED_MS) {
@@ -182,7 +186,10 @@ export function describeState({
         local: lastAttempt?.local ?? lastSuccess?.local ?? '不明',
         reference: unsupported
             ? '比較していません'
-            : (lastSuccess?.reference ?? '不明'),
+            : lastAttempt?.platform &&
+                lastAttempt.platform !== lastSuccess?.platform
+              ? '不明'
+              : (lastSuccess?.reference ?? '不明'),
         lastSuccessAt: format(lastSuccess?.at),
         lastAttempt: attemptText,
     };

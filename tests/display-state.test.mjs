@@ -319,3 +319,14 @@ test('channel opt-out shows no badge, an invalid setting shows gray', () => {
     assert.match(invalid.title, /チャンネル設定が不正/);
     assert.equal(invalid.notification, null);
 });
+
+test('an offline attempt on another platform cannot display the old reference', () => {
+    const view = describeState({
+        lastAttempt: failure({ platform: 'mac' }),
+        lastSuccess: outdated,
+        now,
+        formatTime: (iso) => iso,
+    });
+    assert.equal(view.reference, '不明');
+    assert.equal(view.outdated, false);
+});
